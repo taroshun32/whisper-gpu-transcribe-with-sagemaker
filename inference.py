@@ -1,8 +1,10 @@
 import os
 import logging
+import uuid
 from faster_whisper import WhisperModel
 
 logging.basicConfig(level=logging.INFO)
+
 
 def model_fn(model_dir):
     logging.info('start model_fn')
@@ -28,7 +30,8 @@ def input_fn(input_data, content_type):
     try:
         if content_type == 'audio/mpeg':
             os.makedirs('/tmp', exist_ok=True)
-            local_path = '/tmp/input_data.mp3'
+            unique_filename = str(uuid.uuid4())
+            local_path = f'/tmp/{unique_filename}.mp3'
 
             with open(local_path, 'wb') as f:
                 f.write(input_data)
@@ -46,25 +49,23 @@ def predict_fn(local_path, model):
     logging.info('start predict_fn')
 
     try:
-        segments, info = model.transcribe(local_path, beam_size=5)
+        segments, info = model.transcribe(local_path, beam_size=5, vad_filter=True, without_timestamps=True)
 
         logging.info(f"Detected language '{info.language}' with probability {float(info.language_probability):.2f}")
 
         results = []
         for segment in segments:
             result = {
-                "start": segment.start,
-                "end": segment.end,
                 "text": segment.text
             }
             results.append(result)
-            logging.info(f"[{float(segment.start):.2f}s -> {float(segment.end):.2f}s] {segment.text}")
+            logging.info(segment.text)
     except Exception as e:
         logging.error(f"Error predict_fn: {str(e)}")
         raise
 
     logging.info('complete predict_fn')
-    return results
+    return results, local_path
 
 
 def output_fn(results, accept):
@@ -72,7 +73,10 @@ def output_fn(results, accept):
 
     try:
         if accept == 'text/plain':
-            transcription_text = "\n".join([segment['text'] for segment in results])
+            transcription_text = "\n".join([segment['text'] for segment in results[0]])
+
+            os.remove(results[1])
+
             return transcription_text, accept
         else:
             raise ValueError(f"Illegal accept {accept}. The only allowed content_type is text/plain")
